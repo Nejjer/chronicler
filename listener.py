@@ -1,103 +1,136 @@
 import os
+import time
 
-import sounddevice as sd
-import numpy as np
+import torch
 import whisper
 from pyannote.audio import Pipeline
-from scipy.io.wavfile import write
-import tempfile
+import sounddevice as sd
+import wave
 
 auth_token = os.getenv('AUTH_TOKEN')
 
-# Инициализация моделей
-whisper_model = whisper.load_model("base")  # Выберите размер модели (base, small, medium, large)
-diarization_pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization", use_auth_token=auth_token)
+speakers = {
+    'SPEAKER_00': 'Sinep',
+    'SPEAKER_01': 'Woofka1',
+}
 
-# Параметры записи
-SAMPLE_RATE = 16000
-DURATION = 2  # Длительность записи в секундах
-TEMP_DIR = tempfile.gettempdir()
+from listener_utils import words_per_segment
 
-from scipy.io.wavfile import write
 
-def save_audio_segment(audio, sample_rate, start, end, output_path):
-    """Сохраняет сегмент аудио в WAV-файл."""
-    # Вычисляем начало и конец сегмента в выборках
-    start_sample = int(start * sample_rate)
-    end_sample = int(end * sample_rate)
-    # Извлекаем сегмент и сохраняем в WAV
-    segment = audio[start_sample:end_sample]
-    segment = (segment * 32767).astype(np.int16)  # Преобразование в 16-битный формат
-    write(output_path, sample_rate, segment)
-
-def record_audio(duration, sample_rate):
-    """Записывает аудио с микрофона."""
+# Параметры записи аудио
+def record_audio(output_file, duration=2, sample_rate=16000, channels=1):
+    """
+    Записывает аудио с микрофона и сохраняет его в указанный файл.
+    """
     print("Начало записи...")
-    audio = sd.rec(int(duration * sample_rate), samplerate=sample_rate, channels=1, dtype='int16')
-    sd.wait()  # Ожидание окончания записи
-    print("Запись завершена.")
-    return audio
+    audio = sd.rec(int(duration * sample_rate), samplerate=sample_rate, channels=channels, dtype='int16')
+    sd.wait()  # Ожидание завершения записи
 
-def save_wav(audio, sample_rate, filename):
-    """Сохраняет аудио в WAV-файл."""
-    write(filename, sample_rate, audio)
+    # Сохранение аудио в файл
+    with wave.open(output_file, 'wb') as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(2)  # 2 байта на выборку
+        wf.setframerate(sample_rate)
+        wf.writeframes(audio.tobytes())
+    print(f"Запись завершена. Файл сохранен как {output_file}")
 
-def diarize_audio(filename):
-    """Выполняет идентификацию говорящих."""
-    diarization = diarization_pipeline({"uri": "recording", "audio": filename})
+
+# Функция распознавания речи с помощью Whisper
+def transcribe_audio(whisper_model, audio_file):
+    """
+    Распознает текст из аудио файла с использованием Whisper.
+    """
+    model = whisper.load_model(whisper_model)
+    print("Начинается распознавание речи...")
+    result = model.transcribe(audio_file)
+    print("Распознавание завершено.")
+    return result['text']
+
+
+# Функция для выполнения диаризации (разделение по участникам)
+def diarize_audio(audio_file, pyannote_pipeline):
+    """
+    Выполняет диаризацию аудио с использованием Pyannote.
+    """
+    print("Начинается диаризация...")
+    diarization = pyannote_pipeline(audio_file)
+    print("Диаризация завершена.")
     return diarization
 
-def transcribe_segment(audio_path, segment, model):
-    """Расшифровывает сегмент речи."""
-    # Обрезка аудио по временным рамкам сегмента
-    start_time = segment["start"]
-    end_time = segment["end"]
-    result = model.transcribe(audio_path, initial_prompt="", verbose=False, word_timestamps=True,
-                              condition_on_previous_text=False, suppress_tokens=[])
-    return start_time, end_time, result["text"]
 
-# Основной процесс
+# Сохранение текста в формате Markdown
+def save_transcription_to_md(final_result, output_file):
+    """
+    Сохраняет текстовое содержание в формате Markdown.
+    """
+    print("Сохранение результата в Markdown файл...")
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write(f"# Расшифровка диалога\n\n")
+        for entry in final_result:
+            speaker = final_result[entry]['speaker']
+            text = final_result[entry]['text']
+            if len(text) == 0:
+                continue
+            text = text.replace("  ", " ")
+            start_time = final_result[entry]['start']
+            end_time = final_result[entry]['end']
+            f.write(f"{speakers[speaker]}:{text}\n\n")
+    print(f"Результат сохранен в файл {output_file}")
+
+
+def my_save_transcription_to_md(transcription, diarization, output_file):
+    """
+    Сохраняет текстовое содержание в формате Markdown.
+    """
+    print("Сохранение результата в Markdown файл...")
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write(f"# Расшифровка диалога\n\n")
+        for segment, speaker in zip(diarization.itertracks(yield_label=True), transcription.split('\n')):
+            start_time = segment[0].start
+            end_time = segment[0].end
+            speaker_label = speaker[1]
+            f.write(f"{speaker_label}: {speaker}\n\n")
+    print(f"Результат сохранен в файл {output_file}")
+
+
 def main():
-    # 1. Записываем звук
-    audio_data = record_audio(DURATION, SAMPLE_RATE)
+    # Задаем параметры
+    audio_file = "records/dialogue.wav"
+    whisper_model_type = "turbo"  # Или другой тип модели Whisper
+    output_md_file = "transcripts/transcription.md"
 
-    # 2. Сохраняем результат в WAV-файл
-    temp_audio_path = f"{TEMP_DIR}/recording.wav"
-    save_wav(audio_data, SAMPLE_RATE, temp_audio_path)
+    # Убедитесь, что вы настроили Pyannote pipeline (нужен токен доступа)
+    pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization", use_auth_token=auth_token)
+    pipeline.to(torch.device("cuda"))
+    # Записываем аудио
+    # record_audio(audio_file, duration=20)  # Запись 2 секунд
 
-    # 3. Идентификация говорящих
-    diarization_result = diarize_audio(temp_audio_path)
-    print("Идентификация говорящих завершена.")
+    print('Загружаем модель для распознавания текста')
+    model = whisper.load_model(whisper_model_type)
+    print('Диарилизуем аудио')
+    diarization_result = pipeline(audio_file)
+    print('Преобразуем аудио в текст')
+    transcription_result = model.transcribe(audio_file, word_timestamps=True)
 
-    transcripts = []
-    for segment in diarization_result.itertracks(yield_label=True):
-        start, end = segment[0].start, segment[0].end
-        speaker = segment[2]  # Метка говорящего
-        print(f"Распознавание речи для сегмента: {start:.2f}-{end:.2f}, Говорящий: {speaker}")
+    final_result = words_per_segment(transcription_result, diarization_result)
 
-        # Сохраняем сегмент в WAV-файл
-        audio_segment_path = f"{TEMP_DIR}/segment_{start:.2f}_{end:.2f}.wav"
-        save_audio_segment(audio_data, SAMPLE_RATE, start, end, audio_segment_path)
+    # # Распознаем текст из аудио
+    # transcription = transcribe_audio(whisper_model_type, audio_file)
+    #
+    # # Выполняем диаризацию
+    # diarization_result = diarize_audio(audio_file, pipeline)
+    #
+    # # Сохраняем результат в Markdown
+    # my_save_transcription_to_md(transcription, diarization_result, output_md_file)
 
-        # Расшифровка сегмента
-        _, _, transcript = transcribe_segment(audio_segment_path, segment[0], whisper_model)
-        transcripts.append(f"[{speaker}] {transcript}")
+    print('Сохраняем результат в Markdown')
+    save_transcription_to_md(final_result, output_md_file)
 
-    # 5. Вывод текста
-    print("\nРезультаты распознавания:")
-    for line in transcripts:
-        print(line)
-
-    # 6. Сохранение результатов в файл
-    with open("dialogue_transcripts.md", "w", encoding="utf-8") as f:
-        f.write("# Диалоговая летопись\n\n")
-        for line in transcripts:
-            f.write(f"{line}\n")
-    print("Результаты сохранены в dialogue_transcripts.md")
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as err:
-        print(err)
-        lol = input()
+    start_time = time.time()  # Засекаем время начала
+    main()
+    end_time = time.time()  # Засекаем время окончания
+    execution_time = end_time - start_time  # Вычисляем разницу
+    print(f"Время выполнения скрипта: {execution_time:.4f} секунд")
+    input()
