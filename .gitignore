@@ -1,3 +1,5 @@
 .env
 records/
 transcripts/
+transcripts_splits/
+summarizers/
