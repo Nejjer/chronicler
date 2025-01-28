@@ -1,11 +1,14 @@
 import os
 import time
+from dotenv import load_dotenv
 
 import torch
 import whisper
 from pyannote.audio import Pipeline
 import sounddevice as sd
 import wave
+
+load_dotenv()
 
 auth_token = os.getenv('AUTH_TOKEN')
 
@@ -72,8 +75,6 @@ def save_transcription_to_md(final_result, output_file):
             if len(text) == 0:
                 continue
             text = text.replace("  ", " ")
-            start_time = final_result[entry]['start']
-            end_time = final_result[entry]['end']
             f.write(f"{speakers[speaker]}:{text}\n\n")
     print(f"Результат сохранен в файл {output_file}")
 
@@ -86,8 +87,6 @@ def my_save_transcription_to_md(transcription, diarization, output_file):
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(f"# Расшифровка диалога\n\n")
         for segment, speaker in zip(diarization.itertracks(yield_label=True), transcription.split('\n')):
-            start_time = segment[0].start
-            end_time = segment[0].end
             speaker_label = speaker[1]
             f.write(f"{speaker_label}: {speaker}\n\n")
     print(f"Результат сохранен в файл {output_file}")

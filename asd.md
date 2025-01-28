@@ -7,3 +7,7 @@ Reenabling some hernya
 
 - 72.4612
 - 71.7932
+
+### wsl
+- 72.8965
+- 71.9654

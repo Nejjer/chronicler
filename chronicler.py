@@ -1,23 +1,39 @@
+import torch
 from transformers import pipeline
 
-combined_text = "LLM (Large Language Models) are powerful artificial intelligence models designed to process and generate human language. These models are trained on vast amounts of text data, allowing them to effectively understand context and perform a variety of tasks, such as text translation, summarization, answering questions, and content creation. LLMs use neural network architectures, particularly transformers, which help process information and generate text that closely resembles human language. One of the key features of these models is their ability to work with context and generate meaningful, coherent responses. Popular examples of LLMs include OpenAI's GPT-3 and GPT-4, Google's BERT, and others. These technologies are widely used in chatbots, content creation, customer support, programming assistance, and many other fields."
 
 
-class Summarizer:
-    def __init__(self):
-        print('Start initialization model')
-        self.llm_summarizer = pipeline("summarization", model="t5-3b")  # Инициализация локальной модели
-        print('Initialization done!')
+def summarize_minecraft_content(file_path):
+    with open(file_path, 'r', encoding='utf-8') as file:
+        text = file.read()
 
-    def summarize(self):
-        print('Start summarize!')
-        summary = self.llm_summarizer(combined_text, max_length=100, min_length=30, do_sample=False)
-        print('Summarize done!')
-        # Сохраняем результат анализа
-        summary_text = summary[0]['summary_text']
-        print(f"Краткое описание контента: {summary_text}")
+    pipe = pipeline(
+        "text-generation",
+        model="google/gemma-2-9b-it",
+        model_kwargs={"torch_dtype": torch.bfloat16},
+        device="cuda",  # replace with "mps" to run on a Mac device
+    )
+
+    prompt = (
+            "Summarize the following text, focusing only on information related to Minecraft with mods: "
+            + text
+    )
+
+    messages = [{"role": "user", "content": prompt}]
 
 
-# Запуск основного кода
-if __name__ == "__main__":
-    Summarizer().summarize()
+    outputs = pipe(messages, max_new_tokens=512)
+    assistant_response = outputs[0]["generated_text"][-1]["content"].strip()
+    print(assistant_response)
+
+
+
+
+# Example usage
+
+
+
+
+
+
+summarize_minecraft_content("./transcripts/transcription.md")
