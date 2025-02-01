@@ -1,27 +1,39 @@
 import time
-
+import logging
 from chronicler import write_story
-from clear_files import delete_files_in_directories
-from split_to_files import split_md_file
-from summarizer import summary_all_files
+from summarizer import summary_all
 from transcribition import transcrib
+from file_manager import FileManager
+
+PROMPT_CHRONICLER_TEMPLATE = """Я играю в средневековую сборку модов в майнкрафт со своим другом. 
+Ниже описания событий, которые с нами произошли.
+Перескажи эти события так, как будто это летопись 845 года
+Используй архаичный стиль. События должны быть представлены в хронологическом порядке.
+
+Исходный текст:
+{content}
+
+Летописная запись:"""
+
+MODEL_NAME = "qwen2.5:3b"  # Убедитесь, что модель скачана через ollama pull
 
 if __name__ == "__main__":
-    print('Чистим все старые обработки')
-    directories_to_clear = ["summarizers", "transcripts", "transcripts_splits"]
-    delete_files_in_directories(directories_to_clear)
-    # print('Останаливаем олламу, чтобы освободить память')
+    logging.basicConfig(
+        level=logging.INFO,  # Уровень логов
+        format="%(asctime)s - %(levelname)s - %(message)s",  # Формат сообщения
+    )
+    logging.info("Start")
 
     start_time = time.time()  # Засекаем время начала
-    print('Транскрибируем аудио')
-    transcrib(audio_file='records/Untitled.wav')
-    print('Разбиваем файлы на части')
-    split_md_file('transcripts/transcription.md')
-    print('Суммаризируем транскрибицию')
-    summary_all_files()
-    print('Пишем летопись')
-    write_story()
+
+    file_manager = FileManager(audio_file="records/dialogue.wav")
+    transcrib(file_manager=file_manager)
+    file_manager.split_transcription_by_words()
+    summary_all(file_manager, MODEL_NAME)
+    write_story(file_manager, MODEL_NAME, PROMPT_CHRONICLER_TEMPLATE)
+
     end_time = time.time()  # Засекаем время окончания
     execution_time = end_time - start_time  # Вычисляем разницу
-    print(f"Время выполнения скрипта: {execution_time:.4f} секунд")
+    logging.info(f"Executing time: {execution_time:.4f} seconds")
+
     input()

@@ -1,3 +1,4 @@
+import pyannote.core
 import pyannote
 
 

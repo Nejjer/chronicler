@@ -1,79 +1,48 @@
-import re
 from datetime import datetime
-from pathlib import Path
-
+from file_manager import FileManager
 import ollama
-
+import logging
 # Конфигурация
-MODEL_NAME = "qwen2.5:14b"
-SUMMARIES_DIR = Path("summarizers")
-OUTPUT_FILE = Path("chronicles.md")
-PROMPT_TEMPLATE = """Я играю в средневековую сборку модов в майнкрафт со своим другом. 
-Ниже описания событий, которые с нами произошли.
-Перескажи эти события так, как будто это летопись 845 года
-Используй архаичный стиль. События должны быть представлены в хронологическом порядке.
-
-Исходный текст:
-{content}
-
-Летописная запись:"""
 
 
 # Функция генерации летописи
-def generate_chronicle(text: str) -> str:
+def generate_chronicle(text: str, model_name, prompt_template) -> str:
     try:
         response = ollama.generate(
-            model=MODEL_NAME,
-            prompt=PROMPT_TEMPLATE.format(content=text),
-            options={'temperature': 0.8, 'num_predict': 2048}
+            model=model_name,
+            prompt=prompt_template.format(content=text),
+            options={"temperature": 0.8, "num_predict": 2048},
         )
-        return response['response']
+        return response["response"]
     except Exception as e:
         return f"## Ошибка генерации\n```\n{str(e)}\n```"
 
 
-# Регулярное выражение для извлечения номера части файла
-file_pattern = re.compile(r"part_(\d+)_analysis\.txt")
-
-# Сортировка файлов по номерам частей
-sorted_files = sorted(
-    SUMMARIES_DIR.glob("*_analysis.txt"),
-    key=lambda f: int(file_pattern.search(f.name).group(1)) if file_pattern.search(f.name) else float('inf'))
-
-
 # Собираем все записи
-def write_story():
+def write_story(file_manager: FileManager, model_name, prompt_template):
     chronicles = []
-    for summary_file in sorted_files:
+    for summary_file in file_manager.get_all_summaries():
         try:
             # Чтение файла
             content = summary_file.read_text(encoding="utf-8")
 
             # Генерация
-            entry = generate_chronicle(content)
+            entry = generate_chronicle(content, model_name, prompt_template)
 
             # Форматирование записи
-            chronicles.append(
-                f"{entry}\n\n"
-                f"---\n"
-            )
-            print(f"Обработано: {summary_file.name}")
+            chronicles.append(f"{entry}\n\n---\n")
+            logging.info(f"Wrote for: {summary_file.name}")
 
         except Exception as e:
-            print(f"Ошибка при обработке {summary_file.name}: {str(e)}")
+            logging.error(f"Error with {summary_file.name}: {str(e)}")
 
     # Создаем итоговый документ
     header = f"""# Хроники Minecraft-событий\n
-    **Дата составления:** {datetime.now().strftime("%Y-%m-%d %H:%M")}\n
     **Всего записей:** {len(chronicles)}\n\n
     """
+    file_manager.save_chronicle(header + "\n".join(chronicles))
 
-    OUTPUT_FILE.write_text(
-        header + "\n".join(chronicles),
-        encoding="utf-8"
-    )
-
-    print(f"Готово! Результаты сохранены в {OUTPUT_FILE}")
+    logging.info("Done")
 
 
 if __name__ == "__main__":

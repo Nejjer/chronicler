@@ -1,19 +1,11 @@
 import time
-from pathlib import Path
-
+from file_manager import FileManager
 import ollama
-
-# Конфигурация
-MODEL_NAME = "qwen2.5:14b"  # Убедитесь, что модель скачана через ollama pull
-TRANSCRIPTS_DIR = Path("transcripts_splits")
-SUMMARIES_DIR = Path("summarizers")
-
-# Создаем выходную директорию
-SUMMARIES_DIR.mkdir(exist_ok=True)
+import logging
 
 
 # Функция для генерации ответа через Ollama
-def generate_summary(text: str) -> str:
+def generate_summary(text: str, model_name: str) -> str:
     prompt = f"""Проанализируй приведенную в файле транскрипцию нашего разговора во время игры в Minecraft с модами.
 Сначала выбери только те события, который относятся к игре в майнкрафт.
 Потом определи участника или участников события
@@ -33,41 +25,41 @@ def generate_summary(text: str) -> str:
 
     try:
         response = ollama.generate(
-            model=MODEL_NAME,
+            model=model_name,
             prompt=prompt,
-            options={
-                'temperature': 0.7,
-                'num_predict': 1024
-            }
+            options={"temperature": 0.7, "num_predict": 1024},
         )
-        return response['response']
+        return response["response"]
     except Exception as e:
         return f"Ошибка генерации: {str(e)}"
 
 
-def summary_all_files():
+def summary_all(file_manager: FileManager, model_name: str):
     # Обработка файлов
-    for transcript_file in TRANSCRIPTS_DIR.glob("*.md"):
+    for transcript_file in file_manager.get_all_splited_transcriptions():
         try:
             # Чтение файла
             content = transcript_file.read_text(encoding="utf-8")
 
             # Генерация анализа
             start_time = time.time()
-            summary = generate_summary(content)
+            summary = generate_summary(content, model_name)
             generation_time = time.time() - start_time
 
             # Сохранение результата
-            output_file = SUMMARIES_DIR / f"{transcript_file.stem}_analysis.txt"
-            output_file.write_text(summary, encoding="utf-8")
+            file_manager.save_summatize(
+                summary_text=summary, part_id=transcript_file.stem
+            )
 
-            print(f"Обработан {transcript_file.name} за {generation_time:.2f}с")
+            logging.info(
+                f"Summarized {transcript_file.name} for {generation_time:.2f}с"
+            )
 
         except Exception as e:
-            print(f"Ошибка обработки {transcript_file.name}: {str(e)}")
+            logging.info(f"Summarize error {transcript_file.name}: {str(e)}")
 
-    print("Суммаризация завершена!")
+    logging.info("Summarize done!")
 
 
 if __name__ == "__main__":
-    summary_all_files()
+    summary_all(FileManager())
