@@ -1,39 +1,80 @@
-import torch
-from transformers import pipeline
+import re
+from datetime import datetime
+from pathlib import Path
+
+import ollama
+
+# Конфигурация
+MODEL_NAME = "qwen2.5:14b"
+SUMMARIES_DIR = Path("summarizers")
+OUTPUT_FILE = Path("chronicles.md")
+PROMPT_TEMPLATE = """Я играю в средневековую сборку модов в майнкрафт со своим другом. 
+Ниже описания событий, которые с нами произошли.
+Перескажи эти события так, как будто это летопись 845 года
+Используй архаичный стиль. События должны быть представлены в хронологическом порядке.
+
+Исходный текст:
+{content}
+
+Летописная запись:"""
 
 
+# Функция генерации летописи
+def generate_chronicle(text: str) -> str:
+    try:
+        response = ollama.generate(
+            model=MODEL_NAME,
+            prompt=PROMPT_TEMPLATE.format(content=text),
+            options={'temperature': 0.8, 'num_predict': 2048}
+        )
+        return response['response']
+    except Exception as e:
+        return f"## Ошибка генерации\n```\n{str(e)}\n```"
 
-def summarize_minecraft_content(file_path):
-    with open(file_path, 'r', encoding='utf-8') as file:
-        text = file.read()
 
-    pipe = pipeline(
-        "text-generation",
-        model="google/gemma-2-9b-it",
-        model_kwargs={"torch_dtype": torch.bfloat16},
-        device="cuda",  # replace with "mps" to run on a Mac device
+# Регулярное выражение для извлечения номера части файла
+file_pattern = re.compile(r"part_(\d+)_analysis\.txt")
+
+# Сортировка файлов по номерам частей
+sorted_files = sorted(
+    SUMMARIES_DIR.glob("*_analysis.txt"),
+    key=lambda f: int(file_pattern.search(f.name).group(1)) if file_pattern.search(f.name) else float('inf'))
+
+
+# Собираем все записи
+def write_story():
+    chronicles = []
+    for summary_file in sorted_files:
+        try:
+            # Чтение файла
+            content = summary_file.read_text(encoding="utf-8")
+
+            # Генерация
+            entry = generate_chronicle(content)
+
+            # Форматирование записи
+            chronicles.append(
+                f"{entry}\n\n"
+                f"---\n"
+            )
+            print(f"Обработано: {summary_file.name}")
+
+        except Exception as e:
+            print(f"Ошибка при обработке {summary_file.name}: {str(e)}")
+
+    # Создаем итоговый документ
+    header = f"""# Хроники Minecraft-событий\n
+    **Дата составления:** {datetime.now().strftime("%Y-%m-%d %H:%M")}\n
+    **Всего записей:** {len(chronicles)}\n\n
+    """
+
+    OUTPUT_FILE.write_text(
+        header + "\n".join(chronicles),
+        encoding="utf-8"
     )
 
-    prompt = (
-            "Summarize the following text, focusing only on information related to Minecraft with mods: "
-            + text
-    )
-
-    messages = [{"role": "user", "content": prompt}]
+    print(f"Готово! Результаты сохранены в {OUTPUT_FILE}")
 
 
-    outputs = pipe(messages, max_new_tokens=512)
-    assistant_response = outputs[0]["generated_text"][-1]["content"].strip()
-    print(assistant_response)
-
-
-
-
-# Example usage
-
-
-
-
-
-
-summarize_minecraft_content("./transcripts/transcription.md")
+if __name__ == "__main__":
+    write_story()
